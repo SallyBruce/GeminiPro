@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shape Morpher</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+            z-index: 100;
+        }
+        /* Custom lil-gui styling to better match the video */
+        .lil-gui.root {
+            --widget-color: #ff5900;
+            --hover-color: #ff8c4a;
+            --title-background-color: #1a1a1a;
+            --title-text-color: #ff9955;
+            --background-color: rgba(0,0,0,0.7);
+            --widget-padding: 4px;
+            --font-size: 13px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">Drag to rotate | Scroll to zoom | Double-click to reset view</div>
+
+    <!-- Import maps for clean Three.js module imports -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        
+        // --- START OF EMBEDDED TEAPOT GEOMETRY ---
+        // This is necessary because TeapotGeometry was removed from the core library
+        // and loading it as a separate file would violate the "single file" requirement.
+        // Source: three.js examples
+        class TeapotGeometry extends THREE.BufferGeometry {
+            constructor( size = 0.5, segments = 10, bottom = true, lid = true, body = true, fitLid = true, blinn = true ) {
+                super();
+                this.type = 'TeapotGeometry';
+                const scope = this;
+                let bC, bV, bN;
+                const teapotSize = size;
+                const tess = segments;
+                let bBottom = bottom;
+                let bLid = lid;
+                let bBody = body;
+                let bFitLid = fitLid;
+                let bBlinn = blinn;
+                let num_vertices = 0;
+                let num_normals = 0;
+                let num_uvs = 0;
+                let num_indices = 0;
+                let indices = [];
+                let vertices = [];
+                let normals = [];
+                let uvs = [];
+                let texture, normal, position;
+                build();
+                function build() {
+                    let p_vertices, p_normals, p_uvs, p_indices;
+                    if ( bBody ) {
+                        p_vertices = getBody( tess, bBlinn );
+                        p_normals = p_vertices[ 1 ]; p_vertices = p_vertices[ 0 ];
+                        p_uvs = getUVs( p_vertices, teapotSize );
+                        p_indices = getIndices( p_vertices, tess, false );
+                        addMesh( p_vertices, p_normals, p_uvs, p_indices );
+                    }
+                    if ( bLid ) {
+                        p_vertices = getLid( tess, bBlinn, bFitLid );
+                        p_normals = p_vertices[ 1 ]; p_vertices = p_vertices[ 0 ];
+                        p_uvs = getUVs( p_vertices, teapotSize );
+                        p_indices = getIndices( p_vertices, tess, false );
+                        addMesh( p_vertices, p_normals, p_uvs, p_indices );
+                    }
+                    if ( bBottom ) {
+                        p_vertices = getBottom( tess, bBlinn );
+                        p_normals = p_vertices[ 1 ]; p_vertices = p_vertices[ 0 ];
+                        p_uvs = getUVs( p_vertices, teapotSize );
+                        p_indices = getIndices( p_vertices, tess, true );
+                        addMesh( p_vertices, p_normals, p_uvs, p_indices );
+                    }
+                    position = new Float32Array( vertices );
+                    normal = new Float32Array( normals );
+                    texture = new Float32Array( uvs );
+                    scope.setIndex( new THREE.BufferAttribute( new Uint16Array( indices ), 1 ) );
+                    scope.setAttribute( 'position', new THREE.BufferAttribute( position, 3 ) );
+                    scope.setAttribute( 'normal', new THREE.BufferAttribute( normal, 3 ) );
+                    scope.setAttribute( 'uv', new THREE.BufferAttribute( texture, 2 ) );
+                }
+                function addMesh( p_vertices, p_normals, p_uvs, p_indices ) {
+                    const N = num_vertices / 3;
+                    let i, l;
+                    for ( i = 0, l = p_vertices.length; i < l; i ++ ) vertices.push( p_vertices[ i ] );
+                    for ( i = 0, l = p_normals.length; i < l; i ++ ) normals.push( p_normals[ i ] );
+                    for ( i = 0, l = p_uvs.length; i < l; i ++ ) uvs.push( p_uvs[ i ] );
+                    for ( i = 0, l = p_indices.length; i < l; i ++ ) indices.push( p_indices[ i ] + N );
+                    num_vertices += p_vertices.length;
+                    num_normals += p_normals.length;
+                    num_uvs += p_uvs.length;
+                    num_indices += p_indices.length;
+                }
+                function getBody( tess, blinn ) {
+                    const controlPoints = [ [ [ 2.00, 0.00, 2.70 ], [ 2.00, - 1.12, 2.70 ], [ 1.12, - 2.00, 2.70 ], [ 0.00, - 2.00, 2.70 ] ], [ [ 2.00, 0.00, 2.58 ], [ 2.00, - 1.12, 2.58 ], [ 1.12, - 2.00, 2.58 ], [ 0.00, - 2.00, 2.58 ] ], [ [ 2.00, 0.00, 2.33 ], [ 2.00, - 1.12, 2.33 ], [ 1.12, - 2.00, 2.33 ], [ 0.00, - 2.00, 2.33 ] ], [ [ 2.00, 0.00, 2.00 ], [ 2.00, - 1.12, 2.00 ], [ 1.12, - 2.00, 2.00 ], [ 0.00, - 2.00, 2.00 ] ], [ [ 1.70, 0.00, 1.50 ], [ 1.70, - 0.95, 1.50 ], [ 0.95, - 1.70, 1.50 ], [ 0.00, - 1.70, 1.50 ] ], [ [ 1.70, 0.00, 1.35 ], [ 1.70, - 0.95, 1.35 ], [ 0.95, - 1.70, 1.35 ], [ 0.00, - 1.70, 1.35 ] ], [ [ 1.70, 0.00, 1.20 ], [ 1.70, - 0.95, 1.20 ], [ 0.95, - 1.70, 1.20 ], [ 0.00, - 1.70, 1.20 ] ], [ [ 2.40, 0.00, 0.75 ], [ 2.40, - 1.34, 0.75 ], [ 1.34, - 2.40, 0.75 ], [ 0.00, - 2.40, 0.75 ] ], [ [ 2.40, 0.00, 0.50 ], [ 2.40, - 1.34, 0.50 ], [ 1.34, - 2.40, 0.50 ], [ 0.00, - 2.40, 0.50 ] ], [ [ 1.50, 0.00, 0.25 ], [ 1.50, - 0.84, 0.25 ], [ 0.84, - 1.50, 0.25 ], [ 0.00, - 1.50, 0.25 ] ], [ [ 1.50, 0.00, 0.13 ], [ 1.50, - 0.84, 0.13 ], [ 0.84, - 1.50, 0.13 ], [ 0.00, - 1.50, 0.13 ] ] ];
+                    bV = new Bezier( controlPoints, 10, tess, blinn );
+                    return bV.getSurface();
+                }
+                function getLid( tess, blinn, fitLid ) {
+                    const controlPoints = [ [ [ 1.05, 0.00, 3.00 ], [ 1.05, - 0.59, 3.00 ], [ 0.59, - 1.05, 3.00 ], [ 0.00, - 1.05, 3.00 ] ], [ [ 1.40, 0.00, 2.90 ], [ 1.40, - 0.78, 2.90 ], [ 0.78, - 1.40, 2.90 ], [ 0.00, - 1.40, 2.90 ] ], [ [ 1.50, 0.00, 2.70 ], [ 1.50, - 0.84, 2.70 ], [ 0.84, - 1.50, 2.70 ], [ 0.00, - 1.50, 2.70 ] ], [ [ 1.60, 0.00, 2.50 ], [ 1.60, - 0.90, 2.50 ], [ 0.90, - 1.60, 2.50 ], [ 0.00, - 1.60, 2.50 ] ], [ [ 1.70, 0.00, 2.30 ], [ 1.70, - 0.95, 2.30 ], [ 0.95, - 1.70, 2.30 ], [ 0.00, - 1.70, 2.30 ] ], [ [ 2.00, 0.00, 2.25 ], [ 2.00, - 1.12, 2.25 ], [ 1.12, - 2.00, 2.25 ], [ 0.00, - 2.00, 2.25 ] ], [ [ 1.30, 0.00, 2.20 ], [ 1.30, - 0.73, 2.20 ], [ 0.73, - 1.30, 2.20 ], [ 0.00, - 1.30, 2.20 ] ], [ [ 1.30, 0.00, 2.15 ], [ 1.30, - 0.73, 2.15 ], [ 0.73, - 1.30, 2.15 ], [ 0.00, - 1.30, 2.15 ] ], [ [ 0.00, 0.00, 2.15 ], [ 0.00, 0.00, 2.15 ], [ 0.00, 0.00, 2.15 ], [ 0.00, 0.00, 2.15 ] ] ];
+                    if ( fitLid ) {
+                        for ( let i = 0; i < controlPoints.length; i ++ ) {
+                            for ( let j = 0; j < controlPoints[ i ].length; j ++ ) {
+                                controlPoints[ i ][ j ][ 0 ] *= 1.032;
+                                controlPoints[ i ][ j ][ 1 ] *= 1.032;
+                            }
+                        }
+                    }
+                    bV = new Bezier( controlPoints, 8, tess, blinn );
+                    return bV.getSurface();
+                }
+                function getBottom( tess, blinn ) {
+                    const controlPoints = [ [ [ 1.50, 0.00, 0.00 ], [ 1.50, - 0.84, 0.00 ], [ 0.84, - 1.50, 0.00 ], [ 0.00, - 1.50, 0.00 ] ], [ [ 1.80, 0.00, 0.05 ], [ 1.80, - 1.01, 0.05 ], [ 1.01, - 1.80, 0.05 ], [ 0.00, - 1.80, 0.05 ] ], [ [ 2.80, 0.00, 0.25 ], [ 2.80, - 1.57, 0.25 ], [ 1.57, - 2.80, 0.25 ], [ 0.00, - 2.80, 0.25 ] ], [ [ 1.50, 0.00, 0.50 ], [ 1.50, - 0.84, 0.50 ], [ 0.84, - 1.50, 0.50 ], [ 0.00, - 1.50, 0.50 ] ] ];
+                    bV = new Bezier( controlPoints, 3, tess, blinn );
+                    return bV.getSurface();
+                }
+                function getUVs( a, size ) {
+                    const uvs = [];
+                    let x, y, z;
+                    let u, v;
+                    for ( let i = 0, l = a.length; i < l; i += 3 ) {
+                        x = a[ i + 0 ] / size; y = a[ i + 1 ] / size; z = a[ i + 2 ] / size;
+                        u = Math.atan2( x, z ) / ( 2.0 * Math.PI ) + 0.5;
+                        v = y * 0.5 + 0.5;
+                        uvs.push( u, v );
+                    }
+                    return uvs;
+                }
+                function getIndices( a, tess, isBottom ) {
+                    const indices = [];
+                    let i, j, l, t;
+                    let stride = tess + 1;
+                    for ( i = 0, l = a.length / 3 / stride - 1; i < l; i ++ ) {
+                        for ( j = 0, t = tess; j < t; j ++ ) {
+                            let a, b, c, d;
+                            a = i * stride + j;
+                            b = i * stride + j + 1;
+                            c = ( i + 1 ) * stride + j;
+                            d = ( i + 1 ) * stride + j + 1;
+                            if ( isBottom ) {
+                                indices.push( a, c, b );
+                                indices.push( b, c, d );
+                            } else {
+                                indices.push( a, b, c );
+                                indices.push( b, d, c );
+                            }
+                        }
+                    }
+                    return indices;
+                }
+                function Bezier( c, n, t, b ) {
+                    this.cPoints = c;
+                    this.numCPoints = n;
+                    this.tess = t;
+                    this.b = b;
+                    this.C = new Array(); this.P = new Array();
+                    this.getSurface = function () {
+                        let i, j, k, l, v, u;
+                        let newVerts = [];
+                        let newNorms = [];
+                        let newIndices = [];
+                        const basis = this.getBasis( this.tess );
+                        const p = new Array( this.tess + 1 );
+                        for ( i = 0; i <= this.tess; i ++ ) p[ i ] = new Array( 3 );
+                        const n = new Array( this.tess + 1 );
+                        for ( i = 0; i <= this.tess; i ++ ) n[ i ] = new Array( 3 );
+                        for ( j = 0, v = 0.0; j <= this.tess; j ++, v += 1.0 / this.tess ) {
+                            for ( i = 0; i < this.numCPoints; i ++ ) {
+                                for ( k = 0; k < 4; k ++ ) {
+                                    this.C[ k ] = new Array( 3 );
+                                    this.C[ k ][ 0 ] = this.cPoints[ i ][ k ][ 0 ];
+                                    this.C[ k ][ 1 ] = this.cPoints[ i ][ k ][ 1 ];
+                                    this.C[ k ][ 2 ] = this.cPoints[ i ][ k ][ 2 ];
+                                }
+                                this.P[ i ] = this.eval( v, this.C, 3 );
+                            }
+                            const q = this.eval( v, this.P, this.numCPoints - 1 );
+                            for ( i = 0; i <= this.tess; i ++ ) p[ i ] = this.eval( basis[ i ], this.P, this.numCPoints - 1 );
+                            let tangent, normal;
+                            for ( k = 0, u = 0.0; k <= this.tess; k ++, u += 1.0 / this.tess ) {
+                                tangent = this.getTangent( u, this.P, this.numCPoints - 1 );
+                                normal = this.getNormal( tangent );
+                                for ( i = 0; i < 3; i ++ ) n[ k ][ i ] = normal[ i ];
+                            }
+                            for ( i = 0, l = newVerts.length; i < p.length; i ++ ) newVerts.push( p[ i ][ 0 ], p[ i ][ 1 ], p[ i ][ 2 ] );
+                            for ( i = 0, l = newNorms.length; i < n.length; i ++ ) newNorms.push( n[ i ][ 0 ], n[ i ][ 1 ], n[ i ][ 2 ] );
+                        }
+                        return [ newVerts, newNorms ];
+                    };
+                    this.eval = function ( t, p, n ) {
+                        let i, j, b;
+                        let out = new Array( 3 );
+                        for ( i = 0; i < 3; i ++ ) {
+                            out[ i ] = p[ 0 ][ i ] * this.bern( n, 0, t );
+                            for ( j = 1; j <= n; j ++ ) {
+                                out[ i ] += p[ j ][ i ] * this.bern( n, j, t );
+                            }
+                        }
+                        return out;
+                    };
+                    this.bern = function ( n, i, t ) {
+                        let b = this.fact( n ) / ( this.fact( i ) * this.fact( n - i ) );
+                        return b * Math.pow( t, i ) * Math.pow( 1.0 - t, n - i );
+                    };
+                    this.getBasis = function ( t ) {
+                        let i; let b = [];
+                        let p = [ - 1.0, 3.0, - 3.0, 1.0, 3.0, - 6.0, 3.0, 0.0, - 3.0, 3.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0 ];
+                        let m = [ [ - 1.0, 3.0, - 3.0, 1.0 ], [ 3.0, - 6.0, 3.0, 0.0 ], [ - 3.0, 3.0, 0.0, 0.0 ], [ 1.0, 0.0, 0.0, 0.0 ] ];
+                        let u;
+                        for ( i = 0, u = 0.0; i <= t; i ++, u += 1.0 / t ) {
+                            let q = new Array( 4 );
+                            q[ 0 ] = m[ 0 ][ 0 ] * Math.pow( u, 3 ) + m[ 0 ][ 1 ] * Math.pow( u, 2 ) + m[ 0 ][ 2 ] * u + m[ 0 ][ 3 ];
+                            q[ 1 ] = m[ 1 ][ 0 ] * Math.pow( u, 3 ) + m[ 1 ][ 1 ] * Math.pow( u, 2 ) + m[ 1 ][ 2 ] * u + m[ 1 ][ 3 ];
+                            q[ 2 ] = m[ 2 ][ 0 ] * Math.pow( u, 3 ) + m[ 2 ][ 1 ] * Math.pow( u, 2 ) + m[ 2 ][ 2 ] * u + m[ 2 ][ 3 ];
+                            q[ 3 ] = m[ 3 ][ 0 ] * Math.pow( u, 3 ) + m[ 3 ][ 1 ] * Math.pow( u, 2 ) + m[ 3 ][ 2 ] * u + m[ 3 ][ 3 ];
+                            b.push( q );
+                        }
+                        return b;
+                    };
+                    this.getTangent = function ( t, p, n ) {
+                        let i;
+                        let out = new Array( 3 );
+                        for ( i = 0; i < 3; i ++ ) {
+                            out[ i ] = - 3 * ( 1 - t ) * ( 1 - t ) * p[ 0 ][ i ];
+                            out[ i ] += ( - 6 * t * ( 1 - t ) + 3 * ( 1 - t ) * ( 1 - t ) ) * p[ 1 ][ i ];
+                            out[ i ] += ( - 3 * t * t + 6 * t * ( 1 - t ) ) * p[ 2 ][ i ];
+                            out[ i ] += 3 * t * t * p[ 3 ][ i ];
+                        }
+                        const len = Math.sqrt( out[ 0 ] * out[ 0 ] + out[ 1 ] * out[ 1 ] + out[ 2 ] * out[ 2 ] );
+                        for ( i = 0; i < 3; i ++ ) out[ i ] /= len;
+                        return out;
+                    };
+                    this.getNormal = function ( t ) {
+                        let out = new Array( 3 );
+                        if ( b ) {
+                            let temp = Math.cos( Math.PI / 2.0 );
+                            out[ 0 ] = t[ 1 ] * temp - t[ 2 ] * Math.sin( Math.PI / 2.0 );
+                            out[ 1 ] = t[ 0 ] * temp - t[ 2 ] * 0.0;
+                            out[ 2 ] = t[ 0 ] * Math.sin( Math.PI / 2.0 ) - t[ 1 ] * 0.0;
+                        } else {
+                            out[ 0 ] = t[ 1 ]; out[ 1 ] = - t[ 0 ]; out[ 2 ] = 0.0;
+                        }
+                        const len = Math.sqrt( out[ 0 ] * out[ 0 ] + out[ 1 ] * out[ 1 ] + out[ 2 ] * out[ 2 ] );
+                        for ( let i = 0; i < 3; i ++ ) out[ i ] /= len;
+                        return out;
+                    };
+                    this.fact = function ( n ) {
+                        if ( n < 2 ) return 1;
+                        let f = 1;
+                        for ( let i = n; i > 1; i -- ) f *= i;
+                        return f;
+                    };
+                }
+            }
+        }
+        // --- END OF EMBEDDED TEAPOT GEOMETRY ---
+
+
+        // --- Basic Setup ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 2;
+        controls.maxDistance = 20;
+
+        // --- Post-Processing (for Bloom/Glow) ---
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // --- Motion Trail Setup ---
+        // This is done by rendering a semi-transparent plane over the scene each frame
+        renderer.autoClear = false;
+        const trailScene = new THREE.Scene();
+        const trailMaterial = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.7 // 1 - motionTrail value
+        });
+        const trailPlane = new THREE.PlaneGeometry(1, 1);
+        const trailQuad = new THREE.Mesh(trailPlane, trailMaterial);
+        trailScene.add(trailQuad);
+        const trailCamera = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, -10000, 10000);
+
+        // --- Particle System ---
+        const PARTICLE_COUNT = 80000;
+        const currentPositions = new Float32Array(PARTICLE_COUNT * 3);
+        const targetPositions = new Float32Array(PARTICLE_COUNT * 3);
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(currentPositions, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 0.035,
+            color: 0xff5900,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            depthWrite: false
+        });
+
+        const particles = new THREE.Points(geometry, material);
+        scene.add(particles);
+        
+        // --- GUI and Parameters ---
+        const params = {
+            particleSize: 0.035,
+            rotationSpeed: 0.001, // Adjusted for animation loop
+            particleColor: '#ff5900',
+            bloomStrength: 0.8,
+            motionTrail: 0.3,
+            shape: 'Sphere'
+        };
+
+        const shapeActions = {
+            Sphere: () => morphToShape('Sphere'),
+            Cube: () => morphToShape('Cube'),
+            Torus: () => morphToShape('Torus'),
+            Icosahedron: () => morphToShape('Icosahedron'),
+            Teapot: () => morphToShape('Teapot'),
+            DNA: () => morphToShape('DNA'),
+        };
+
+        const gui = new GUI({ title: 'Shape Morpher' });
+        gui.add(params, 'particleSize', 0.001, 0.1).onChange(v => material.size = v);
+        gui.add(params, 'rotationSpeed', 0, 0.01).name('Rotation Speed');
+        gui.addColor(params, 'particleColor').name('Particle Color').onChange(v => material.color.set(v));
+
+        const effectsFolder = gui.addFolder('Effects');
+        effectsFolder.add(params, 'bloomStrength', 0, 2).name('Bloom Strength').onChange(v => bloomPass.strength = v);
+        effectsFolder.add(params, 'motionTrail', 0, 0.95).name('Motion Trail').onChange(v => trailMaterial.opacity = 1 - v);
+
+        const shapeFolder = gui.addFolder('Shapes');
+        Object.keys(shapeActions).forEach(key => shapeFolder.add(shapeActions, key));
+        
+        // Initialize GUI values from params
+        material.size = params.particleSize;
+        bloomPass.strength = params.bloomStrength;
+        trailMaterial.opacity = 1 - params.motionTrail;
+
+        // --- Shape Vertex Generation ---
+        const tempVector = new THREE.Vector3();
+
+        function getShapeVertices(shapeName) {
+            const vertices = new Float32Array(PARTICLE_COUNT * 3);
+            
+            switch (shapeName) {
+                case 'Sphere': {
+                    for (let i = 0; i < PARTICLE_COUNT; i++) {
+                        const phi = Math.acos(-1 + (2 * i) / PARTICLE_COUNT);
+                        const theta = Math.sqrt(PARTICLE_COUNT * Math.PI) * phi;
+                        tempVector.setFromSphericalCoords(2.5, phi, theta);
+                        tempVector.toArray(vertices, i * 3);
+                    }
+                    break;
+                }
+                case 'Cube': {
+                    const size = 3;
+                    const halfSize = size / 2;
+                    for (let i = 0; i < PARTICLE_COUNT; i++) {
+                        let x, y, z;
+                        const face = Math.floor(Math.random() * 6);
+                        switch (face) {
+                            case 0: x = halfSize; y = THREE.MathUtils.randFloatSpread(size); z = THREE.MathUtils.randFloatSpread(size); break; // +X
+                            case 1: x = -halfSize; y = THREE.MathUtils.randFloatSpread(size); z = THREE.MathUtils.randFloatSpread(size); break; // -X
+                            case 2: y = halfSize; x = THREE.MathUtils.randFloatSpread(size); z = THREE.MathUtils.randFloatSpread(size); break; // +Y
+                            case 3: y = -halfSize; x = THREE.MathUtils.randFloatSpread(size); z = THREE.MathUtils.randFloatSpread(size); break; // -Y
+                            case 4: z = halfSize; x = THREE.MathUtils.randFloatSpread(size); y = THREE.MathUtils.randFloatSpread(size); break; // +Z
+                            case 5: z = -halfSize; x = THREE.MathUtils.randFloatSpread(size); y = THREE.MathUtils.randFloatSpread(size); break; // -Z
+                        }
+                        tempVector.set(x, y, z);
+                        tempVector.toArray(vertices, i * 3);
+                    }
+                    break;
+                }
+                case 'Torus': {
+                    const R = 2; // Major radius
+                    const r = 1; // Minor radius
+                    for (let i = 0; i < PARTICLE_COUNT; i++) {
+                        const u = Math.random() * Math.PI * 2;
+                        const v = Math.random() * Math.PI * 2;
+                        tempVector.set(
+                            (R + r * Math.cos(v)) * Math.cos(u),
+                            r * Math.sin(v),
+                            (R + r * Math.cos(v)) * Math.sin(u)
+                        );
+                        tempVector.toArray(vertices, i * 3);
+                    }
+                    break;
+                }
+                case 'Icosahedron':
+                case 'Teapot': {
+                    let sourceGeometry;
+                    if (shapeName === 'Icosahedron') {
+                        sourceGeometry = new THREE.IcosahedronGeometry(2.5, 5);
+                    } else { // Teapot
+                        sourceGeometry = new TeapotGeometry(1.5, 10);
+                        sourceGeometry.center(); // Center the teapot
+                    }
+                    const sampler = new THREE.MeshSurfaceSampler(new THREE.Mesh(sourceGeometry)).build();
+                    for (let i = 0; i < PARTICLE_COUNT; i++) {
+                        sampler.sample(tempVector);
+                        tempVector.toArray(vertices, i * 3);
+                    }
+                    sourceGeometry.dispose();
+                    break;
+                }
+                case 'DNA': {
+                    const length = 4;
+                    const radius = 1.5;
+                    const turns = 4;
+                    const particlesPerStrand = PARTICLE_COUNT / 2 * 0.8;
+                    const particlesPerRung = PARTICLE_COUNT * 0.2;
+
+                    let pIndex = 0;
+                    // Strand 1
+                    for (let i = 0; i < particlesPerStrand; i++, pIndex++) {
+                        const y = THREE.MathUtils.lerp(-length, length, i / particlesPerStrand);
+                        const angle = y / length * turns * Math.PI * 2;
+                        tempVector.set(radius * Math.cos(angle), y, radius * Math.sin(angle));
+                        tempVector.toArray(vertices, pIndex * 3);
+                    }
+                    // Strand 2
+                    for (let i = 0; i < particlesPerStrand; i++, pIndex++) {
+                        const y = THREE.MathUtils.lerp(-length, length, i / particlesPerStrand);
+                        const angle = y / length * turns * Math.PI * 2 + Math.PI; // 180 degree offset
+                        tempVector.set(radius * Math.cos(angle), y, radius *  Math.sin(angle));
+                        tempVector.toArray(vertices, pIndex * 3);
+                    }
+                    // Rungs
+                    for (let i = 0; i < particlesPerRung; i++, pIndex++) {
+                        const y = THREE.MathUtils.randFloatSpread(length * 2);
+                        const angle = y / length * turns * Math.PI * 2;
+                        const p1 = new THREE.Vector3(radius * Math.cos(angle), y, radius * Math.sin(angle));
+                        const p2 = new THREE.Vector3(radius * Math.cos(angle + Math.PI), y, radius * Math.sin(angle + Math.PI));
+                        tempVector.lerpVectors(p1, p2, Math.random());
+                        tempVector.toArray(vertices, pIndex * 3);
+                    }
+                    break;
+                }
+            }
+            return vertices;
+        }
+
+        // --- Morphing Logic ---
+        function morphToShape(shapeName) {
+            const newVertices = getShapeVertices(shapeName);
+            for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
+                targetPositions[i] = newVertices[i];
+            }
+        }
+        
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            
+            // Apply motion trail effect
+            renderer.render(trailScene, trailCamera);
+
+            // Lerp current positions to target positions for smooth morphing
+            for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
+                currentPositions[i] += (targetPositions[i] - currentPositions[i]) * 2.0 * delta;
+            }
+            geometry.attributes.position.needsUpdate = true;
+            
+            // Rotate the particle system
+            particles.rotation.y += params.rotationSpeed;
+            
+            controls.update();
+            composer.render();
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        renderer.domElement.addEventListener('dblclick', () => {
+            controls.reset();
+        });
+
+
+        // --- Initialisation ---
+        morphToShape('Sphere'); // Start with the sphere
+        // Instantly set current positions to target on first load to avoid a morph-in effect
+        for(let i=0; i<targetPositions.length; i++) {
+            currentPositions[i] = targetPositions[i];
+        }
+
+        animate();
+
+    </script>
+</body>
+</html>
